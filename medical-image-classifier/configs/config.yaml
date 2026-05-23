@@ -1,0 +1,25 @@
+data:
+  data_dir: "data/chest_xray"
+  img_size: 224
+  batch_size: 32
+  num_workers: 4
+
+model:
+  num_classes: 2
+  dropout: 0.5
+  pretrained: true
+
+training:
+  num_epochs: 25
+  warmup_epochs: 5          # Phase 1: train head only
+  head_lr: 1.0e-3
+  backbone_lr: 1.0e-5       # Much lower lr for pretrained layers
+  weight_decay: 1.0e-4
+  early_stopping_patience: 7
+
+paths:
+  save_dir: "models"
+  output_dir: "outputs"
+  log_file: "logs/training.log"
+
+seed: 42
