@@ -23,6 +23,44 @@ Binary classification of frontal chest X-rays into **NORMAL** vs **PNEUMONIA** u
 
 ---
 
+## Demo
+
+```bash
+streamlit run app/app.py
+```
+
+Upload a frontal chest X-ray and the app returns a classification, a confidence, and a Grad-CAM heatmap
+showing which regions drove the decision. The clinical disclaimer sits above the result, not below it.
+
+**Pneumonia case** — correctly classified, Grad-CAM concentrated on the lower-left lung field:
+
+![Streamlit app classifying a pneumonia X-ray](docs/demo_pneumonia.png)
+
+**Normal case** — correctly classified:
+
+![Streamlit app classifying a normal X-ray](docs/demo_normal.png)
+
+### A failure case
+
+The screenshots above are the good days. This is one of the 34 normal X-rays the model flags as pneumonia
+— confidently, at 100%:
+
+![Streamlit app misclassifying a normal X-ray as pneumonia](docs/demo_false_positive.png)
+
+Worth showing, for two reasons. The confidence score is not a reliability estimate — softmax saturates,
+and a wrong answer looks exactly as certain as a right one. And the Grad-CAM heatmap still looks
+plausible, which is the honest limitation of post-hoc explanation: it shows where the model looked, not
+whether it was right to look there. Anyone reading a heatmap as a justification will find one.
+
+### Running the demo elsewhere
+
+The trained checkpoint is ~94 MB and is **not** in this repository (`models/*.pth` is gitignored), so a
+fresh clone starts without one and the app will tell you so rather than failing obscurely. To deploy it —
+on Streamlit Community Cloud or anywhere else — either train first (`python scripts/train.py`) or attach
+`best_model.pth` to a GitHub Release and fetch it on startup.
+
+---
+
 ## Methodology
 
 **The Kaggle `test/` folder was never used for training, validation, early stopping, or model selection.**
@@ -155,6 +193,7 @@ Medical-Image-Classifier/
 │   ├── test_results.json                   # Full test metrics (committed)
 │   ├── training_history_random_split.json  # The superseded image-level-split run
 │   └── test_results_random_split.json      # …and its test metrics, for comparison
+├── docs/                    # README screenshots of the running app
 ├── outputs/                 # Plots & prediction images (gitignored)
 ├── logs/                    # Training logs (gitignored)
 ├── data/                    # Dataset (gitignored — download separately)
