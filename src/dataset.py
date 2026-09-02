@@ -1,8 +1,10 @@
-import numpy as np
 from pathlib import Path
-from PIL import Image
+from typing import ClassVar
+
+import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
+from PIL import Image
+from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 from torchvision import transforms
 
 
@@ -13,8 +15,8 @@ class ChestXRayDataset(Dataset):
         data/chest_xray/{train,val,test}/{NORMAL,PNEUMONIA}/*.jpeg
     """
 
-    CLASSES = ["NORMAL", "PNEUMONIA"]
-    CLASS_TO_IDX = {"NORMAL": 0, "PNEUMONIA": 1}
+    CLASSES: ClassVar[list[str]] = ["NORMAL", "PNEUMONIA"]
+    CLASS_TO_IDX: ClassVar[dict[str, int]] = {"NORMAL": 0, "PNEUMONIA": 1}
 
     def __init__(self, root_dir: str, split: str = "train", transform=None):
         self.root_dir = Path(root_dir)
@@ -134,3 +136,30 @@ def get_dataloaders(
         ),
     }
     return loaders, datasets
+
+
+def get_test_loader(
+    data_dir: str,
+    batch_size: int = 32,
+    img_size: int = 224,
+    num_workers: int = 4,
+) -> tuple[DataLoader, ChestXRayDataset]:
+    """Build a loader for the held-out test split only.
+
+    ``get_dataloaders`` constructs all three splits plus a WeightedRandomSampler
+    over the 5,216 training images. Evaluation needs none of that, and it should
+    not fail just because ``train/`` is absent from a deployment checkout.
+    """
+    dataset = ChestXRayDataset(
+        root_dir=data_dir,
+        split="test",
+        transform=get_transforms("test", img_size),
+    )
+    loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+    return loader, dataset

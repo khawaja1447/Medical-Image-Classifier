@@ -4,9 +4,9 @@ Reference: Selvaraju et al., "Grad-CAM: Visual Explanations from Deep Networks
            via Gradient-based Localization", ICCV 2017.
 """
 
-from typing import Optional
-import numpy as np
+
 import cv2
+import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -16,8 +16,8 @@ class GradCAM:
 
     def __init__(self, model: torch.nn.Module, target_layer: torch.nn.Module):
         self.model = model
-        self._activations: Optional[torch.Tensor] = None
-        self._gradients: Optional[torch.Tensor] = None
+        self._activations: torch.Tensor | None = None
+        self._gradients: torch.Tensor | None = None
 
         self._fwd_handle = target_layer.register_forward_hook(self._fwd_hook)
         self._bwd_handle = target_layer.register_full_backward_hook(self._bwd_hook)
@@ -39,7 +39,7 @@ class GradCAM:
     def generate(
         self,
         input_tensor: torch.Tensor,
-        class_idx: Optional[int] = None,
+        class_idx: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """Return a (H, W) float32 CAM array in [0, 1] and the predicted class index."""
         self.model.eval()
@@ -47,15 +47,28 @@ class GradCAM:
         if input_tensor.dim() == 3:
             input_tensor = input_tensor.unsqueeze(0)
 
-        output = self.model(input_tensor)
+        # The backward hook only fires if the target layer sits on an autograd
+        # graph. With a frozen backbone none of its parameters require grad, so
+        # the input has to carry requires_grad itself or no gradients arrive.
+        input_tensor = input_tensor.detach().clone().requires_grad_(True)
 
-        if class_idx is None:
-            class_idx = int(output.argmax(dim=1))
+        with torch.enable_grad():
+            output = self.model(input_tensor)
 
-        self.model.zero_grad()
-        one_hot = torch.zeros_like(output)
-        one_hot[0, class_idx] = 1.0
-        output.backward(gradient=one_hot, retain_graph=True)
+            if class_idx is None:
+                class_idx = int(output.argmax(dim=1))
+
+            self.model.zero_grad()
+            one_hot = torch.zeros_like(output)
+            one_hot[0, class_idx] = 1.0
+            output.backward(gradient=one_hot, retain_graph=True)
+
+        if self._gradients is None:
+            raise RuntimeError(
+                "No gradients captured for the Grad-CAM target layer. The layer "
+                "is not on the autograd graph — check that it is not frozen and "
+                "that gradients are enabled."
+            )
 
         # α_k = global-average-pool of gradients for channel k
         weights = self._gradients.mean(dim=(2, 3), keepdim=True)
@@ -65,7 +78,18 @@ class GradCAM:
             cam, size=input_tensor.shape[2:], mode="bilinear", align_corners=False
         )
         cam = cam.squeeze().cpu().numpy()
-        cam = (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
+
+        # Normalise with an epsilon relative to the CAM's own magnitude. A fixed
+        # 1e-8 dominates whenever the raw range is smaller than that, which
+        # silently breaks the documented [0, 1] contract.
+        cam_min, cam_max = float(cam.min()), float(cam.max())
+        span = cam_max - cam_min
+        scale = max(abs(cam_max), abs(cam_min))
+        eps = np.finfo(np.float32).eps * scale if scale > 0 else np.finfo(np.float32).tiny
+        if span <= eps:
+            # Degenerate, near-constant CAM: no localisation signal to report.
+            return np.zeros_like(cam, dtype=np.float32), class_idx
+        cam = (cam - cam_min) / span
         return cam.astype(np.float32), class_idx
 
     # ------------------------------------------------------------------

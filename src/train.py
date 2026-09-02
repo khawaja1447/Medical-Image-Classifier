@@ -5,11 +5,9 @@ import logging
 import time
 from pathlib import Path
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.cuda.amp import GradScaler, autocast
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from .utils import save_checkpoint
@@ -50,17 +48,17 @@ def _train_one_epoch(
     optimizer: optim.Optimizer,
     criterion: nn.Module,
     device: torch.device,
-    scaler: GradScaler,
-    scheduler=None,
+    scaler: "torch.amp.GradScaler",
 ) -> tuple[float, float]:
     model.train()
     total_loss = correct = total = 0
+    amp_on = device.type == "cuda"
 
     for images, labels in loader:
         images, labels = images.to(device), labels.to(device)
         optimizer.zero_grad(set_to_none=True)
 
-        with autocast():
+        with torch.amp.autocast(device.type, enabled=amp_on):
             logits = model(images)
             loss = criterion(logits, labels)
 
@@ -69,9 +67,6 @@ def _train_one_epoch(
         nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         scaler.step(optimizer)
         scaler.update()
-
-        if scheduler is not None:
-            scheduler.step()
 
         total_loss += loss.item() * images.size(0)
         preds = logits.argmax(dim=1)
@@ -87,32 +82,25 @@ def _evaluate(
     loader,
     criterion: nn.Module,
     device: torch.device,
-) -> tuple[float, float, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[float, float]:
+    """Return (loss, accuracy) on `loader`.
+
+    The criterion passed here must be unweighted, otherwise val_loss is not
+    comparable across runs or against the training loss.
+    """
     model.eval()
     total_loss = correct = total = 0
-    all_preds, all_labels, all_probs = [], [], []
 
     for images, labels in loader:
         images, labels = images.to(device), labels.to(device)
         logits = model(images)
         loss = criterion(logits, labels)
-        probs = torch.softmax(logits, dim=1)
-        preds = logits.argmax(dim=1)
 
         total_loss += loss.item() * images.size(0)
-        correct += preds.eq(labels).sum().item()
+        correct += logits.argmax(dim=1).eq(labels).sum().item()
         total += images.size(0)
-        all_preds.extend(preds.cpu().numpy())
-        all_labels.extend(labels.cpu().numpy())
-        all_probs.extend(probs.cpu().numpy())
 
-    return (
-        total_loss / total,
-        100.0 * correct / total,
-        np.array(all_preds),
-        np.array(all_labels),
-        np.array(all_probs),
-    )
+    return total_loss / total, 100.0 * correct / total
 
 
 # ------------------------------------------------------------------
@@ -124,6 +112,9 @@ class Trainer:
 
     Phase 1 (warmup_epochs): backbone frozen, head only.
     Phase 2 (remaining):     full fine-tuning with differential LRs.
+
+    Both phases checkpoint against the same running best, so a warm-up epoch
+    that produces the best validation score is not discarded.
     """
 
     def __init__(
@@ -138,7 +129,9 @@ class Trainer:
         self.device = device
         self.save_dir = Path(save_dir)
         self.save_dir.mkdir(parents=True, exist_ok=True)
-        self.scaler = GradScaler()
+        # AMP is a CUDA optimisation; on CPU it is disabled rather than warned
+        # about on every batch.
+        self.scaler = torch.amp.GradScaler(device.type, enabled=device.type == "cuda")
         self.history: dict[str, list[float]] = {
             "train_loss": [], "train_acc": [],
             "val_loss": [],   "val_acc": [],
@@ -146,16 +139,19 @@ class Trainer:
 
     # ------------------------------------------------------------------
 
-    def fit(self, train_loader, val_loader, class_weights=None):
+    def fit(self, train_loader, val_loader):
         cfg = self.config["training"]
         num_epochs = cfg["num_epochs"]
         warmup = cfg["warmup_epochs"]
 
-        criterion = (
-            nn.CrossEntropyLoss(weight=class_weights.to(self.device))
-            if class_weights is not None
-            else nn.CrossEntropyLoss()
-        )
+        # Class imbalance is corrected exactly once, by the WeightedRandomSampler
+        # on `train_loader`. Adding class weights to the loss as well would apply
+        # the same 2.9:1 correction twice.
+        criterion = nn.CrossEntropyLoss()
+
+        best_val_acc = 0.0
+        last_val_acc = 0.0
+        epochs_run = 0
 
         # ---- Phase 1: head only ----
         self.model.freeze_backbone()
@@ -167,8 +163,18 @@ class Trainer:
 
         logger.info(f"=== Phase 1: head-only training ({warmup} epochs) ===")
         for ep in range(1, warmup + 1):
-            self._run_epoch(ep, warmup, train_loader, val_loader,
-                            head_optimizer, criterion, phase=1)
+            last_val_acc = self._run_epoch(
+                ep, warmup, train_loader, val_loader,
+                head_optimizer, criterion, phase=1,
+            )
+            epochs_run += 1
+            if last_val_acc > best_val_acc:
+                best_val_acc = last_val_acc
+                save_checkpoint(
+                    self.model, epochs_run, last_val_acc,
+                    self.config, self.save_dir / "best_model.pth"
+                )
+                logger.info(f"  -> Checkpoint saved (val_acc={last_val_acc:.2f}%)")
 
         # ---- Phase 2: full fine-tune ----
         self.model.unfreeze_backbone()
@@ -183,32 +189,37 @@ class Trainer:
         )
         scheduler = CosineAnnealingLR(optimizer, T_max=fine_tune_epochs, eta_min=1e-7)
         early_stop = EarlyStopping(patience=cfg["early_stopping_patience"])
-        best_val_acc = 0.0
 
         logger.info(f"=== Phase 2: full fine-tuning ({fine_tune_epochs} epochs) ===")
         for ep in range(1, fine_tune_epochs + 1):
-            val_acc = self._run_epoch(
+            last_val_acc = self._run_epoch(
                 ep, fine_tune_epochs, train_loader, val_loader,
                 optimizer, criterion, scheduler=scheduler, phase=2,
             )
-            if val_acc > best_val_acc:
-                best_val_acc = val_acc
+            epochs_run += 1
+            if last_val_acc > best_val_acc:
+                best_val_acc = last_val_acc
                 save_checkpoint(
-                    self.model, ep + warmup, val_acc,
+                    self.model, epochs_run, last_val_acc,
                     self.config, self.save_dir / "best_model.pth"
                 )
-                logger.info(f"  -> Checkpoint saved (val_acc={val_acc:.2f}%)")
+                logger.info(f"  -> Checkpoint saved (val_acc={last_val_acc:.2f}%)")
 
-            if early_stop(val_acc):
+            if early_stop(last_val_acc):
                 logger.info("Early stopping triggered.")
                 break
 
+        # `last_model.pth` records the epoch that actually ran last and *its own*
+        # accuracy — not the best score, which belongs to best_model.pth.
         save_checkpoint(
-            self.model, num_epochs, best_val_acc,
+            self.model, epochs_run, last_val_acc,
             self.config, self.save_dir / "last_model.pth"
         )
         self._dump_history()
-        logger.info(f"Done. Best val accuracy: {best_val_acc:.2f}%")
+        logger.info(
+            f"Done. Best val accuracy: {best_val_acc:.2f}%  "
+            f"(last epoch {epochs_run}: {last_val_acc:.2f}%)"
+        )
         return self.history
 
     # ------------------------------------------------------------------
@@ -222,7 +233,7 @@ class Trainer:
             self.model, train_loader, optimizer, criterion,
             self.device, self.scaler,
         )
-        val_loss, val_acc, _, _, _ = _evaluate(
+        val_loss, val_acc = _evaluate(
             self.model, val_loader, criterion, self.device
         )
         if scheduler is not None:

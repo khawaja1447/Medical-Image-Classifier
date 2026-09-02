@@ -35,6 +35,10 @@ models/*.ckpt
 outputs/
 logs/
 
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
 # IDE
 .vscode/
 .idea/

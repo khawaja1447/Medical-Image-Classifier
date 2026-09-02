@@ -40,10 +40,18 @@ class ResNet50Classifier(nn.Module):
     # ------------------------------------------------------------------
 
     def _init_classifier(self):
-        for m in self.classifier.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
-                nn.init.constant_(m.bias, 0)
+        linears = [m for m in self.classifier.modules() if isinstance(m, nn.Linear)]
+
+        # Hidden layers are followed by a ReLU, so Kaiming's relu gain applies.
+        for m in linears[:-1]:
+            nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+            nn.init.constant_(m.bias, 0)
+
+        # The output layer feeds a softmax, not a ReLU. Kaiming's sqrt(2) relu
+        # gain inflates the initial logits and starts training over-confident;
+        # Xavier is the right choice for a linear output.
+        nn.init.xavier_normal_(linears[-1].weight)
+        nn.init.constant_(linears[-1].bias, 0)
 
     # ------------------------------------------------------------------
     # Backbone freezing helpers
@@ -87,5 +95,11 @@ class ResNet50Classifier(nn.Module):
 
     @property
     def grad_cam_target_layer(self) -> nn.Module:
-        """The last conv layer — standard target for Grad-CAM on ResNet-50."""
-        return self.features[-1][-1].conv3
+        """``layer4`` — the conventional Grad-CAM target for ResNet.
+
+        Hooking the stage as a whole, rather than the final 1x1 conv inside its
+        last bottleneck, keeps the residual addition and the output ReLU inside
+        the captured activation. That is what Grad-CAM assumes, and it is what
+        the architecture diagram in the README describes.
+        """
+        return self.features[-1]

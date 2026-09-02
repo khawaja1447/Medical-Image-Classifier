@@ -4,10 +4,10 @@ Run:
     streamlit run app/app.py
 """
 
+import io
 import sys
 from pathlib import Path
 
-import cv2
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,6 +31,12 @@ CLASSES = ["NORMAL", "PNEUMONIA"]
 CHECKPOINT_PATH = Path("models/best_model.pth")
 CLASS_COLORS = {"NORMAL": "#28a745", "PNEUMONIA": "#dc3545"}
 CLASS_ICONS = {"NORMAL": "✅", "PNEUMONIA": "⚠️"}
+
+DISCLAIMER = (
+    "**Clinical Disclaimer** — This tool is for educational and research purposes only. "
+    "It is **not** a medical device and must not be used for clinical diagnosis. "
+    "Always consult a qualified radiologist and physician."
+)
 
 # ------------------------------------------------------------------
 # Page config
@@ -126,7 +132,7 @@ def build_figure(image_pil, cam, img_np, overlay, probs):
     fig = plt.figure(figsize=(16, 5), facecolor=BG)
 
     panels = [
-        (np.array(image_pil.resize((224, 224))), "Original X-Ray", "gray"),
+        (np.array(image_pil.resize((224, 224))), "Model input (224×224)", "gray"),
         (cam, "Grad-CAM", "hot"),
         (overlay, "Overlay", None),
     ]
@@ -140,7 +146,7 @@ def build_figure(image_pil, cam, img_np, overlay, probs):
     ax_bar = fig.add_subplot(1, 4, 4)
     colors = [CLASS_COLORS[c] for c in CLASSES]
     bars = ax_bar.barh(CLASSES, probs * 100, color=colors, edgecolor="#555", lw=0.6)
-    for bar, p in zip(bars, probs):
+    for bar, p in zip(bars, probs, strict=True):
         ax_bar.text(
             bar.get_width() + 0.8, bar.get_y() + bar.get_height() / 2,
             f"{p * 100:.1f}%", va="center", color="white", fontsize=10,
@@ -162,12 +168,13 @@ def build_figure(image_pil, cam, img_np, overlay, probs):
 
 def sidebar():
     with st.sidebar:
+        st.warning(DISCLAIMER)
         st.markdown("## 🫁 About")
         st.info(
             "**Model:** ResNet-50 (transfer learning)\n\n"
             "**Dataset:** Kaggle Chest X-Ray (5,863 images)\n\n"
             "**Classes:** Normal · Pneumonia\n\n"
-            "**Accuracy:** ~94% on test set\n\n"
+            "**Test accuracy:** 92.47%  (0.94 F1 on pneumonia)\n\n"
             "**Explainability:** Grad-CAM heatmaps"
         )
         st.markdown("## 🏷️ Tech Stack")
@@ -191,7 +198,7 @@ def main():
     # Hero
     st.markdown('<h1 class="hero-title">🫁 Medical Image Classifier</h1>', unsafe_allow_html=True)
     st.markdown(
-        '<p class="hero-sub">ResNet-50 Transfer Learning · Grad-CAM Explainability · 94%+ Accuracy</p>',
+        '<p class="hero-sub">ResNet-50 Transfer Learning · Grad-CAM Explainability · 92.47% Test Accuracy</p>',
         unsafe_allow_html=True,
     )
     st.divider()
@@ -215,20 +222,15 @@ def main():
 
     if uploaded is None:
         # Demo placeholder
-        st.info("Upload a chest X-ray above to get a diagnosis.")
+        st.info("Upload a chest X-ray above to get a classification.")
         return
 
     if not model_ready:
         st.warning("Model not loaded — cannot analyse. See error above.")
         return
 
-    import tempfile, os
-    suffix = os.path.splitext(uploaded.name)[-1] or ".jpg"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(uploaded.getvalue())
-        tmp_path = tmp.name
-    image_pil = Image.open(tmp_path).convert("RGB").resize((224, 224))
-    os.unlink(tmp_path)
+    # Read straight from memory — no tempfile write/reopen/unlink round-trip.
+    image_pil = Image.open(io.BytesIO(uploaded.getvalue())).convert("RGB")
 
     with st.spinner("Analysing …"):
         probs, tensor = run_inference(model, device, image_pil)
@@ -238,10 +240,17 @@ def main():
     pred_class = CLASSES[pred_idx]
     confidence = float(probs[pred_idx]) * 100
 
+    # ---- Clinical disclaimer, ahead of the result ----
+    st.warning(DISCLAIMER)
+
     # ---- Top result strip ----
     col_img, col_pred = st.columns([1, 2], gap="large")
     with col_img:
         st.image(image_pil, caption="Uploaded X-Ray", use_container_width=True)
+        st.caption(
+            f"{image_pil.width}×{image_pil.height} → resized to 224×224, the same "
+            "preprocessing the reported test metrics were measured under."
+        )
     with col_pred:
         css_cls = "pred-normal" if pred_class == "NORMAL" else "pred-pneumo"
         icon = CLASS_ICONS[pred_class]
@@ -252,7 +261,7 @@ def main():
         st.metric("Confidence", f"{confidence:.1f}%")
 
         st.markdown("**Class probabilities**")
-        for cls, prob in zip(CLASSES, probs):
+        for cls, prob in zip(CLASSES, probs, strict=True):
             c1, c2 = st.columns([3, 1])
             c1.progress(float(prob), text=cls)
             c2.caption(f"{prob * 100:.1f}%")
@@ -267,14 +276,6 @@ def main():
     fig = build_figure(image_pil, cam, img_np, overlay, probs)
     st.pyplot(fig, use_container_width=True)
     plt.close(fig)
-
-    # ---- Clinical disclaimer ----
-    st.divider()
-    st.warning(
-        "**Clinical Disclaimer** — This tool is for educational and research purposes only. "
-        "It is **not** a medical device and must not be used for clinical diagnosis. "
-        "Always consult a qualified radiologist and physician."
-    )
 
 
 if __name__ == "__main__":

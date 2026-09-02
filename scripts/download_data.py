@@ -18,7 +18,6 @@ import argparse
 import zipfile
 from pathlib import Path
 
-
 DATASET = "paultimothymooney/chest-xray-pneumonia"
 DEFAULT_DEST = Path("data")
 

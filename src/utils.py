@@ -64,6 +64,8 @@ def load_checkpoint(
     checkpoint_path: str | Path,
     device: torch.device,
 ) -> tuple[float, int]:
-    ckpt = torch.load(checkpoint_path, map_location=device)
+    # weights_only=True refuses to unpickle arbitrary objects — a checkpoint is
+    # untrusted input as soon as it is downloaded rather than trained locally.
+    ckpt = torch.load(checkpoint_path, map_location=device, weights_only=True)
     model.load_state_dict(ckpt["model_state_dict"])
     return ckpt.get("val_acc", 0.0), ckpt.get("epoch", 0)

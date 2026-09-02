@@ -9,9 +9,7 @@ import argparse
 import sys
 from pathlib import Path
 
-import cv2
 import matplotlib.pyplot as plt
-import numpy as np
 import torch
 from PIL import Image
 
@@ -40,7 +38,7 @@ def predict_and_explain(
         print(f"[ERROR] Checkpoint not found: {checkpoint_path}")
         print("        Train first: python scripts/train.py")
         sys.exit(1)
-    val_acc, _ = load_checkpoint(model, checkpoint_path, device)
+    load_checkpoint(model, checkpoint_path, device)
     model = model.to(device).eval()
 
     # --- Image ---
@@ -91,7 +89,7 @@ def predict_and_explain(
         color=[CLASS_COLORS[c] for c in CLASSES],
         edgecolor="white", linewidth=0.5,
     )
-    for bar, prob in zip(bars, probs):
+    for bar, prob in zip(bars, probs, strict=True):
         ax_bar.text(
             bar.get_width() + 0.5, bar.get_y() + bar.get_height() / 2,
             f"{prob * 100:.1f}%", va="center", color="white", fontsize=11,
