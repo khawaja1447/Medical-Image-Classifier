@@ -25,10 +25,10 @@ env/
 data/
 !data/.gitkeep
 
-# Model weights (large binary files)
-models/*.pth
-models/*.pt
-models/*.ckpt
+# Model weights (large binary files) — at any depth under models/
+models/**/*.pth
+models/**/*.pt
+models/**/*.ckpt
 !models/.gitkeep
 
 # Outputs
