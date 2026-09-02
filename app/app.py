@@ -174,7 +174,7 @@ def sidebar():
             "**Model:** ResNet-50 (transfer learning)\n\n"
             "**Dataset:** Kaggle Chest X-Ray (5,863 images)\n\n"
             "**Classes:** Normal · Pneumonia\n\n"
-            "**Test accuracy:** 92.47%  (0.94 F1 on pneumonia)\n\n"
+            "**Test accuracy:** 92.47%  ·  **sensitivity:** 0.967\n\n"
             "**Explainability:** Grad-CAM heatmaps"
         )
         st.markdown("## 🏷️ Tech Stack")

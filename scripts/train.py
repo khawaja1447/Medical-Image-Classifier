@@ -121,11 +121,11 @@ def main(config_path: str = "configs/config.yaml", save_dir: str | None = None):
     logger.info(f"  patients      : {len(set(groups)):,} across {len(full_train):,} images")
     logger.info(
         f"  train         : {len(tr_idx):,} images, {len(set(groups[tr_idx])):,} patients  "
-        f"{dict(zip(ChestXRayDataset.CLASSES, np.bincount(train_targets, minlength=2), strict=True))}"
+        f"{dict(zip(ChestXRayDataset.CLASSES, np.bincount(train_targets, minlength=2).tolist(), strict=True))}"
     )
     logger.info(
         f"  val           : {len(va_idx):,} images, {len(set(groups[va_idx])):,} patients  "
-        f"{dict(zip(ChestXRayDataset.CLASSES, np.bincount(val_targets, minlength=2), strict=True))}"
+        f"{dict(zip(ChestXRayDataset.CLASSES, np.bincount(val_targets, minlength=2).tolist(), strict=True))}"
     )
     logger.info(f"  test (unused) : {len(test_ds):,} images — held out entirely")
     logger.info(f"  sampler weights: {weights.tolist()}")

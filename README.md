@@ -37,6 +37,9 @@ This is the claim the headline number rests on, so it is worth stating plainly:
 Every number in the Results table below is reproducible with `python scripts/evaluate.py`, which writes
 [`models/test_results.json`](models/test_results.json) — committed, so the claims have an artifact behind them.
 
+That separation is what let a real methodology bug be found, fixed, and *measured* without the headline
+moving — see [Finding and fixing a validation leak](#finding-and-fixing-a-validation-leak).
+
 ---
 
 ## Results
@@ -46,19 +49,19 @@ Measured on the Kaggle test folder (624 images: 234 NORMAL, 390 PNEUMONIA).
 | Metric | Value |
 |---|---|
 | Test Accuracy | **92.47%** |
-| AUC-ROC | **0.9703** |
-| Avg. Precision | **0.9775** |
-| **Sensitivity** (pneumonia recall) | **0.9308** — 27 of 390 pneumonia cases missed |
-| **Specificity** (normal recall) | **0.9145** — 20 of 234 normals flagged |
+| AUC-ROC | **0.9700** |
+| Avg. Precision | **0.9744** |
+| **Sensitivity** (pneumonia recall) | **0.9667** — 13 of 390 pneumonia cases missed |
+| **Specificity** (normal recall) | **0.8547** — 34 of 234 normals flagged |
 | F1 (Pneumonia) | 0.94 |
-| F1 (Normal) | 0.90 |
+| F1 (Normal) | 0.89 |
 
 Confusion matrix at the default 0.5 threshold:
 
 |  | pred NORMAL | pred PNEUMONIA |
 |---|---|---|
-| **true NORMAL** | 214 | 20 |
-| **true PNEUMONIA** | 27 | 363 |
+| **true NORMAL** | 200 | 34 |
+| **true PNEUMONIA** | 13 | 377 |
 
 ### Choosing an operating point
 
@@ -68,17 +71,17 @@ be moved deliberately down the precision-recall curve.
 
 `evaluate_model` reports the most precise threshold that still reaches **recall ≥ 0.98**:
 
-| | default (`argmax`, 0.5) | screening point (0.030) |
+| | default (`argmax`, 0.5) | screening point (0.095) |
 |---|---|---|
-| Sensitivity | 0.9308 | **0.9821** |
-| Specificity | 0.9145 | 0.7735 |
-| Precision | 0.9478 | 0.8784 |
-| Accuracy | 92.47% | 90.38% |
-| Missed pneumonia | 27 | **7** |
-| False alarms | 20 | 53 |
+| Sensitivity | 0.9667 | **0.9846** |
+| Specificity | 0.8547 | 0.7863 |
+| Precision | 0.9173 | 0.8848 |
+| Accuracy | 92.47% | 91.03% |
+| Missed pneumonia | 13 | **6** |
+| False alarms | 34 | 50 |
 
-Three points of accuracy buys back 20 of the 27 missed cases. That trade is the whole decision, and it is
-one a clinician should be making explicitly rather than inheriting from a default `argmax`.
+A point and a half of accuracy buys back 7 of the 13 missed cases. That trade is the whole decision, and
+it is one a clinician should be making explicitly rather than inheriting from a default `argmax`.
 
 ---
 
@@ -148,8 +151,10 @@ Medical-Image-Classifier/
 │   ├── test_training.py     # EarlyStopping, class weights, patient_id
 │   └── test_evaluate.py     # evaluate_model, threshold selection
 ├── models/
-│   ├── training_history.json  # Per-epoch curves (committed)
-│   └── test_results.json      # Full test metrics (committed)
+│   ├── training_history.json               # Per-epoch curves (committed)
+│   ├── test_results.json                   # Full test metrics (committed)
+│   ├── training_history_random_split.json  # The superseded image-level-split run
+│   └── test_results_random_split.json      # …and its test metrics, for comparison
 ├── outputs/                 # Plots & prediction images (gitignored)
 ├── logs/                    # Training logs (gitignored)
 ├── data/                    # Dataset (gitignored — download separately)
@@ -201,7 +206,8 @@ Expected output:
 python scripts/train.py
 ```
 
-Training takes ~15 min on a single GPU (RTX 3060+) or ~3 hours on CPU.
+Training takes ~15 min on a single GPU (RTX 3060+). Measured on a 24-core CPU with no GPU, the full
+25-epoch schedule takes **2h 41m** (236 s/epoch while the backbone is frozen, 425 s/epoch once it is not).
 Best checkpoint saved automatically to `models/best_model.pth`.
 
 ### 4. Evaluate
@@ -317,8 +323,46 @@ crosses the boundary. The key handles both naming families — note that NORMAL 
 one-per-patient: 130 of the 1,341 training NORMAL images share an `IM-####` study id with at least one
 other image, so keying on the filename stem alone would leak them.
 
-This does not affect the reported test number, which was never measured on a validation split of any kind.
-It affects how much the validation curve should be *believed*.
+---
+
+## Finding and fixing a validation leak
+
+The first version of this project split validation off with `random_split` over the image list. Validation
+accuracy climbed to **98.2%**, and an earlier run reached **100.0%** — which is the tell. A validation set
+that a model saturates is usually not measuring generalisation.
+
+It was not. The split was leaking patients. The fix was to group by patient before splitting, then retrain
+from scratch and re-measure on the same untouched test folder:
+
+| | image-level split (before) | patient-level split (after) |
+|---|---|---|
+| Best validation accuracy | 98.21% | **96.74%** |
+| **Test accuracy** | **92.47%** | **92.47%** |
+| Test AUC-ROC | 0.9703 | 0.9700 |
+| Sensitivity | 0.9308 | **0.9667** |
+| Specificity | 0.9145 | 0.8547 |
+| Missed pneumonia (of 390) | 27 | **13** |
+| False alarms (of 234) | 20 | 34 |
+
+Three things worth reading off that table:
+
+1. **The test number did not move.** 92.47% before, 92.47% after — the same 577 of 624 correct. The leak
+   inflated the *validation* score, which is what it was selecting against; it never touched the reported
+   result, because the test folder was never part of training or model selection. This is the payoff of
+   keeping that boundary strict: a genuine methodology bug could be fixed without the headline claim
+   needing an asterisk.
+2. **Validation dropped 1.5 points, and that is the honest number.** 96.74% is what generalisation to
+   unseen *patients* actually looks like. The 98.2% was measuring recall of patients already seen.
+3. **The error profile improved where it matters.** Same total errors, redistributed: the retrained model
+   misses 13 pneumonia cases instead of 27. At the recall ≥ 0.98 operating point it is better on every
+   axis — sensitivity 0.9846 vs 0.9821, precision 0.8848 vs 0.8784, specificity 0.7863 vs 0.7735.
+
+Both runs are kept for inspection: [`models/training_history_random_split.json`](models/training_history_random_split.json)
+and [`models/test_results_random_split.json`](models/test_results_random_split.json) hold the superseded run.
+
+Caveat: this is one seed per configuration. The identical test accuracy is a coincidence of two different
+error distributions, not evidence that the split makes no difference — the sensitivity gap is the real
+signal, and it too would need repeated seeds to be called significant.
 
 ---
 
@@ -331,13 +375,17 @@ The model is trained on aspect-squashed images (`Resize((256,256))` → `RandomC
 Letterboxing or centre-cropping the upload "to preserve anatomy" is intuitive but wrong here, because it
 feeds the model a distribution it never saw. Measured on the same test set and checkpoint:
 
-| Inference preprocessing | Accuracy | AUC | Sensitivity |
-|---|---|---|---|
-| Squash to 224×224 (as trained) | **92.47%** | 0.9703 | **0.9308** |
-| Letterbox to square, then resize | 66.35% | 0.9619 | 0.4615 |
-| Centre-crop to square, then resize | 85.42% | 0.9643 | 0.7974 |
+| Inference preprocessing | Accuracy | AUC | Sensitivity | Missed pneumonia |
+|---|---|---|---|---|
+| Squash to 224×224 (as trained) | **92.47%** | 0.9700 | **0.9667** | **13** |
+| Letterbox to square, then resize | 78.37% | 0.9707 | 0.6615 | 132 |
+| Centre-crop to square, then resize | 89.10% | 0.9706 | 0.8564 | 56 |
 
-Letterboxing would miss more than half of all pneumonia cases. Matching train-time preprocessing wins.
+Note that AUC barely moves (0.9700 / 0.9707 / 0.9706). The model still *ranks* the images correctly under
+all three — what breaks is the calibration. Padding or cropping shifts the score distribution, so a
+fixed 0.5 threshold that was tuned on squashed inputs suddenly behaves as a much more conservative cut,
+and sensitivity collapses from 0.967 to 0.662. A threshold-free metric would have hidden this entirely;
+it is only visible because sensitivity at the deployed threshold is what gets reported.
 
 ---
 
