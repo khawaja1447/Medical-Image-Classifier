@@ -1,6 +1,6 @@
 # Medical Image Classifier
 
-> ResNet-50 transfer learning for chest X-ray classification — **92.47% accuracy** on a held-out test set, with Grad-CAM explainability
+> ResNet-50 transfer learning for chest X-ray classification: **92.47% accuracy** on a held-out test set, with Grad-CAM explainability
 
 ![CI](https://github.com/khawaja1447/Medical-Image-Classifier/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python)
@@ -14,12 +14,12 @@
 
 Binary classification of frontal chest X-rays into **NORMAL** vs **PNEUMONIA** using a fine-tuned ResNet-50 backbone with:
 
-- **Two-phase transfer learning** — frozen backbone warm-up followed by full fine-tuning with differential learning rates
-- **Class-imbalance handling** — a `WeightedRandomSampler` over the training subset (applied once; see [Methodology](#methodology))
-- **Patient-level validation split** — no patient appears on both sides of the train/val boundary
-- **Mixed-precision training** — enabled on CUDA, cleanly disabled on CPU
-- **Grad-CAM explainability** — per-prediction heatmaps showing which lung regions drove the decision
-- **Streamlit demo** — interactive web app for real-time inference and visualisation
+- **Two-phase transfer learning**: frozen backbone warm-up followed by full fine-tuning with differential learning rates
+- **Class-imbalance handling**: a `WeightedRandomSampler` over the training subset (applied once; see [Methodology](#methodology))
+- **Patient-level validation split**: no patient appears on both sides of the train/val boundary
+- **Mixed-precision training**: enabled on CUDA, cleanly disabled on CPU
+- **Grad-CAM explainability**: per-prediction heatmaps showing which lung regions drove the decision
+- **Streamlit demo**: interactive web app for real-time inference and visualisation
 
 ---
 
@@ -32,22 +32,22 @@ streamlit run app/app.py
 Upload a frontal chest X-ray and the app returns a classification, a confidence, and a Grad-CAM heatmap
 showing which regions drove the decision. The clinical disclaimer sits above the result, not below it.
 
-**Pneumonia case** — correctly classified, Grad-CAM concentrated on the lower-left lung field:
+**Pneumonia case**, correctly classified. Grad-CAM concentrated on the lower-left lung field:
 
 ![Streamlit app classifying a pneumonia X-ray](docs/demo_pneumonia.png)
 
-**Normal case** — correctly classified:
+**Normal case**, correctly classified:
 
 ![Streamlit app classifying a normal X-ray](docs/demo_normal.png)
 
 ### A failure case
 
-The screenshots above are the good days. This is one of the 34 normal X-rays the model flags as pneumonia
-— confidently, at 100%:
+The screenshots above are the good days. This is one of the 34 normal X-rays the model flags as pneumonia.
+It does so confidently, at 100%:
 
 ![Streamlit app misclassifying a normal X-ray as pneumonia](docs/demo_false_positive.png)
 
-Worth showing, for two reasons. The confidence score is not a reliability estimate — softmax saturates,
+Worth showing, for two reasons. The confidence score is not a reliability estimate: softmax saturates,
 and a wrong answer looks exactly as certain as a right one. And the Grad-CAM heatmap still looks
 plausible, which is the honest limitation of post-hoc explanation: it shows where the model looked, not
 whether it was right to look there. Anyone reading a heatmap as a justification will find one.
@@ -55,8 +55,8 @@ whether it was right to look there. Anyone reading a heatmap as a justification 
 ### Running the demo elsewhere
 
 The trained checkpoint is ~94 MB and is **not** in this repository (`models/*.pth` is gitignored), so a
-fresh clone starts without one and the app will tell you so rather than failing obscurely. To deploy it —
-on Streamlit Community Cloud or anywhere else — either train first (`python scripts/train.py`) or attach
+fresh clone starts without one and the app will tell you so rather than failing obscurely. To deploy it
+on Streamlit Community Cloud or anywhere else, either train first (`python scripts/train.py`) or attach
 `best_model.pth` to a GitHub Release and fetch it on startup.
 
 ---
@@ -70,13 +70,13 @@ This is the claim the headline number rests on, so it is worth stating plainly:
 - Training and validation are both carved out of the Kaggle `train/` folder (5,216 images).
 - The 624-image `test/` folder is loaded exactly once, by `scripts/evaluate.py`, after training is finished.
 - `scripts/train.py` never builds a test loader for optimisation, and `src/dataset.py:get_test_loader()`
-  constructs the test split alone — it does not touch `train/` at all.
+  constructs the test split alone, and does not touch `train/` at all.
 
 Every number in the Results table below is reproducible with `python scripts/evaluate.py`, which writes
-[`models/test_results.json`](models/test_results.json) — committed, so the claims have an artifact behind them.
+[`models/test_results.json`](models/test_results.json), which is committed, so the claims have an artifact behind them.
 
 That separation is what let a real methodology bug be found, fixed, and *measured* without the headline
-moving — see [Finding and fixing a validation leak](#finding-and-fixing-a-validation-leak).
+moving. See [Finding and fixing a validation leak](#finding-and-fixing-a-validation-leak).
 
 ---
 
@@ -89,8 +89,8 @@ Measured on the Kaggle test folder (624 images: 234 NORMAL, 390 PNEUMONIA).
 | Test Accuracy | **92.47%** |
 | AUC-ROC | **0.9700** |
 | Avg. Precision | **0.9744** |
-| **Sensitivity** (pneumonia recall) | **0.9667** — 13 of 390 pneumonia cases missed |
-| **Specificity** (normal recall) | **0.8547** — 34 of 234 normals flagged |
+| **Sensitivity** (pneumonia recall) | **0.9667** (13 of 390 pneumonia cases missed) |
+| **Specificity** (normal recall) | **0.8547** (34 of 234 normals flagged) |
 | F1 (Pneumonia) | 0.94 |
 | F1 (Normal) | 0.89 |
 
@@ -147,13 +147,13 @@ Input (224×224 RGB)
 ```
 
 Grad-CAM hooks `layer4` as a whole, so the residual addition and the output ReLU are inside the captured
-activation — the conventional target for ResNet, and what `model.grad_cam_target_layer` returns.
+activation. That is the conventional target for ResNet, and what `model.grad_cam_target_layer` returns.
 
 **Training strategy**
 
 | Phase | Epochs | Layers trained | LR (backbone / head) |
 |---|---|---|---|
-| Warm-up | 5 | Head only | — / 1e-3 |
+| Warm-up | 5 | Head only | n/a / 1e-3 |
 | Fine-tune | 20 | Entire network | 1e-5 / 1e-3 |
 
 Scheduler: `CosineAnnealingLR` (Phase 2)
@@ -196,7 +196,7 @@ Medical-Image-Classifier/
 ├── docs/                    # README screenshots of the running app
 ├── outputs/                 # Plots & prediction images (gitignored)
 ├── logs/                    # Training logs (gitignored)
-├── data/                    # Dataset (gitignored — download separately)
+├── data/                    # Dataset (gitignored, download separately)
 ├── ruff.toml
 ├── requirements.txt
 └── setup.py
@@ -278,7 +278,7 @@ Open [http://localhost:8501](http://localhost:8501) in your browser.
 
 ## Configuration
 
-All hyperparameters live in [`configs/config.yaml`](configs/config.yaml) — no need to touch source code.
+All hyperparameters live in [`configs/config.yaml`](configs/config.yaml), so there is no need to touch source code.
 
 ```yaml
 training:
@@ -301,7 +301,7 @@ ruff check .
 
 48 tests covering model output shapes, Grad-CAM behaviour (including the frozen-backbone and `no_grad`
 paths), transform correctness, early stopping, class weighting, the patient-ID split key, and the metric
-and threshold-selection maths — **no dataset and no network access required**. Both commands run in CI on
+and threshold-selection maths. **No dataset and no network access required.** Both commands run in CI on
 Python 3.10 and 3.12.
 
 ---
@@ -325,7 +325,7 @@ Class score  →  backprop  →  gradients at layer4
 ## Dataset
 
 **Kaggle Chest X-Ray Images (Pneumonia)**
-Paul Mooney, 2018 — [kaggle.com/paultimothymooney/chest-xray-pneumonia](https://www.kaggle.com/datasets/paultimothymooney/chest-xray-pneumonia)
+Paul Mooney, 2018. [kaggle.com/paultimothymooney/chest-xray-pneumonia](https://www.kaggle.com/datasets/paultimothymooney/chest-xray-pneumonia)
 
 The dataset ships with three folders:
 
@@ -337,7 +337,7 @@ The dataset ships with three folders:
 
 ### The split actually used
 
-The shipped `val/` folder holds 16 images — far too few to select a model against (every accuracy on it is
+The shipped `val/` folder holds 16 images, far too few to select a model against (every accuracy on it is
 a multiple of 6.25%). `scripts/train.py` therefore **ignores `val/` entirely** and carves its own 15%
 validation split out of `train/`:
 
@@ -345,10 +345,10 @@ validation split out of `train/`:
 |---|---|---|---|---|---|
 | Train | 85% of Kaggle `train/` | 4,450 | 2,419 | 1,122 | 3,328 |
 | Val | 15% of Kaggle `train/` | 766 | 427 | 219 | 547 |
-| Test | Kaggle `test/`, untouched | 624 | — | 234 | 390 |
+| Test | Kaggle `test/`, untouched | 624 | n/a | 234 | 390 |
 
 Class imbalance (~2.9:1) is corrected **once**, by a `WeightedRandomSampler` built from the training
-subset only. The loss stays unweighted — applying both would correct the same imbalance twice.
+subset only. The loss stays unweighted, because applying both would correct the same imbalance twice.
 
 ### Why the split is by patient, not by image
 
@@ -358,7 +358,7 @@ image list puts different radiographs of the *same* patient on both sides of the
 accuracy then measures partly-memorised patients rather than generalisation.
 
 `scripts/train.py` uses `GroupShuffleSplit` over a `patient_id()` group key, and asserts that no patient
-crosses the boundary. The key handles both naming families — note that NORMAL files are **not**
+crosses the boundary. The key handles both naming families. Note that NORMAL files are **not**
 one-per-patient: 130 of the 1,341 training NORMAL images share an `IM-####` study id with at least one
 other image, so keying on the filename stem alone would leak them.
 
@@ -367,7 +367,7 @@ other image, so keying on the filename stem alone would leak them.
 ## Finding and fixing a validation leak
 
 The first version of this project split validation off with `random_split` over the image list. Validation
-accuracy climbed to **98.2%**, and an earlier run reached **100.0%** — which is the tell. A validation set
+accuracy climbed to **98.2%**, and an earlier run reached **100.0%**, which is the tell. A validation set
 that a model saturates is usually not measuring generalisation.
 
 It was not. The split was leaking patients. The fix was to group by patient before splitting, then retrain
@@ -385,7 +385,7 @@ from scratch and re-measure on the same untouched test folder:
 
 Three things worth reading off that table:
 
-1. **The test number did not move.** 92.47% before, 92.47% after — the same 577 of 624 correct. The leak
+1. **The test number did not move.** 92.47% before, 92.47% after: the same 577 of 624 correct. The leak
    inflated the *validation* score, which is what it was selecting against; it never touched the reported
    result, because the test folder was never part of training or model selection. This is the payoff of
    keeping that boundary strict: a genuine methodology bug could be fixed without the headline claim
@@ -394,13 +394,13 @@ Three things worth reading off that table:
    unseen *patients* actually looks like. The 98.2% was measuring recall of patients already seen.
 3. **The error profile improved where it matters.** Same total errors, redistributed: the retrained model
    misses 13 pneumonia cases instead of 27. At the recall ≥ 0.98 operating point it is better on every
-   axis — sensitivity 0.9846 vs 0.9821, precision 0.8848 vs 0.8784, specificity 0.7863 vs 0.7735.
+   axis: sensitivity 0.9846 vs 0.9821, precision 0.8848 vs 0.8784, specificity 0.7863 vs 0.7735.
 
 Both runs are kept for inspection: [`models/training_history_random_split.json`](models/training_history_random_split.json)
 and [`models/test_results_random_split.json`](models/test_results_random_split.json) hold the superseded run.
 
 Caveat: this is one seed per configuration. The identical test accuracy is a coincidence of two different
-error distributions, not evidence that the split makes no difference — the sensitivity gap is the real
+error distributions, not evidence that the split makes no difference. The sensitivity gap is the real
 signal, and it too would need repeated seeds to be called significant.
 
 ---
@@ -408,7 +408,7 @@ signal, and it too would need repeated seeds to be called significant.
 ## Preprocessing note
 
 The model is trained on aspect-squashed images (`Resize((256,256))` → `RandomCrop(224)`), and 604 of the
-624 test images are more than 10% off square. Inference must therefore squash the same way — the app and
+624 test images are more than 10% off square. Inference must therefore squash the same way: the app and
 `predict.py` both hand the raw upload to `get_transforms("val")` and nothing else.
 
 Letterboxing or centre-cropping the upload "to preserve anatomy" is intuitive but wrong here, because it
@@ -421,7 +421,7 @@ feeds the model a distribution it never saw. Measured on the same test set and c
 | Centre-crop to square, then resize | 89.10% | 0.9706 | 0.8564 | 56 |
 
 Note that AUC barely moves (0.9700 / 0.9707 / 0.9706). The model still *ranks* the images correctly under
-all three — what breaks is the calibration. Padding or cropping shifts the score distribution, so a
+all three. What breaks is the calibration. Padding or cropping shifts the score distribution, so a
 fixed 0.5 threshold that was tuned on squashed inputs suddenly behaves as a much more conservative cut,
 and sensitivity collapses from 0.967 to 0.662. A threshold-free metric would have hidden this entirely;
 it is only visible because sensitivity at the deployed threshold is what gets reported.
@@ -440,11 +440,11 @@ it is only visible because sensitivity at the deployed threshold is what gets re
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 
 ## Author
 
-**Abeer Ashraf** — BSc IT (AI), Fresh Graduate
+**Abeer Ashraf**, BSc IT (AI), Fresh Graduate
 Built as a portfolio project demonstrating transfer learning, explainable AI, and production-ready ML code.
